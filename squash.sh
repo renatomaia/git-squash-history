@@ -2,71 +2,85 @@
 
 FREEZED=master
 SQUASHED=squashed
-HISTORY=devel
-CHANGES=${1:-`git rev-parse --abbrev-ref HEAD`}
+HISTORY=history
+WORKING=${1:-`git rev-parse --abbrev-ref HEAD`}
 
-if [ -z "$(git branch --contains ${SQUASHED} --list ${CHANGES})" ]
+if [[ "${WORKING}" == "${FREEZED}" || "${WORKING}" == "${SQUASHED}" || "${WORKING}" == "${HISTORY}" ]]
 then
-	echo "Please choose a branch based on '${SQUASHED}'"
-	git branch --contains ${SQUASHED} --list
-	exit 3
+	echo "Please checkout a non-reserved branch (${FREEZED}, ${HISTORY}, ${SQUASHED})"
+	exit 1
 fi
 
-while read line
-do
-	if grep -Fx "$line" < <(git log --format=%s ${SQUASHED}..${CHANGES})
-	then
-		echo "Please squash local commit: ${line}"
-		exit 1
-	fi
-done < <(git log --format=%s ${SQUASHED}..${CHANGES} | grep "fixup!" | sort | uniq | sed 's/fixup! //g')
+if [ "$(git rev-parse ${HISTORY})" != "$(git rev-parse origin/${HISTORY})" ]
+then
+	echo "Please update ${HISTORY}"
+	exit 2
+fi
+
+#while read line
+#do
+#	if grep -Fx "$line" < <(git log --format=%s ${SQUASHED}..${WORKING})
+#	then
+#		echo "Please squash local commit: ${line}"
+#		exit 3
+#	fi
+#done < <(git log --format=%s ${SQUASHED}..${WORKING} | grep "fixup!" | sort | uniq | sed 's/fixup! //g')
 
 git fetch origin ${HISTORY} ${SQUASHED}
 if ! git diff --quiet origin/${HISTORY} origin/${SQUASHED}
 then
-	echo "Error: branches 'origin/${HISTORY}' and 'origin/${SQUASHED}' differ"
-	exit 2
+	echo "Error: branches 'origin/${HISTORY}' and 'origin/${SQUASHED}' differ."
+	exit 4
 fi
 
-if [ -z "$(git branch --contains origin/${SQUASHED} --list ${CHANGES})" ]
+if ! git merge-base --is-ancestor origin/${SQUASHED} ${WORKING}
 then
 	echo "Please rebase your work to 'origin/${SQUASHED}':"
 	echo "$ git rebase -i --autosquash --onto=origin/${SQUASHED} ${SQUASHED}"
-	exit 3
+	exit 5
 fi
 
 while read line
 do
-	if ! grep -Fx "$line" < <(git log --format=%s origin/${FREEZED}..${SQUASHED})
+	if grep -Fx "$line" < <(git log --format=%s origin/${FREEZED}..origin/${SQUASHED})
 	then
 		echo "Error: fixup commit referecing commit on 'origin/${FREEZED}': ${line}"
-		exit 5
+		exit 6
 	fi
-done < <(git log --format=%s origin/${SQUASHED}..${CHANGES} | grep "fixup!" | sort | uniq | sed 's/fixup! //g')
+done < <(git log --format=%s origin/${SQUASHED}..${WORKING} | grep "fixup!" | sort | uniq | sed 's/fixup! //g')
 
 git checkout ${SQUASHED}
 
-if ! git diff --quiet ${SQUASHED} ${CHANGES} && ! git merge --ff-only ${CHANGES}
+if ! git diff --quiet ${SQUASHED} ${WORKING}
 then
-	echo "Critical: unable to update branch '${SQUASHED}"
-	exit 7
+	git merge --ff-only ${WORKING} ||
+	( echo "Critical: unable to update branch '${SQUASHED}." && exit 7 )
 fi
 
 if grep "fixup!" < <(git log --format=%s origin/${FREEZED}..${SQUASHED})
 then
-	echo "Please squash your work on '${CHANGES}':"
-	echo "$ git rebase -i --autosquash ${FREEZED}"
+	echo "Please squash your work on '${WORKING}':"
+	echo "  $ git rebase -i --autosquash ${FREEZED}"
 	exit 8
 fi
 
 echo "Saving changes to branch '${HISTORY}' ..."
 git checkout ${HISTORY} &&
-git reset --hard ${CHANGES} &&
+git reset --hard ${WORKING} &&
 git rebase --onto=origin/${HISTORY} origin/${SQUASHED} &&
-! git diff --quiet ${HISTORY} ${CHANGES} &&
-echo "Critical: failed to update branch '${HISTORY}" && exit 6
+git diff --quiet ${HISTORY} ${WORKING} &&
+git diff --quiet ${HISTORY} ${SQUASHED} ||
+( echo "Critical: failed to update branch '${HISTORY}" && exit 9 )
 
-#if git push ${HISTORY}
-#then
-#	git push --force ${SQUASHED}
-#fi
+if grep "fixup!" < <(git log --format=%s origin/${HISTORY}..${HISTORY})
+then
+	git merge --no-edit ${SQUASHED} ||
+	( echo "Critical: failed to update branch '${HISTORY}" && exit 10 )
+fi
+
+echo "Pushing changes to remote '${HISTORY}' ..."
+git push origin ${HISTORY} &&
+git push origin --force ${SQUASHED} ||
+( echo "Error: unable to push to remote." && exit 11 )
+
+git checkout ${WORKING}
