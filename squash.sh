@@ -17,32 +17,32 @@ then
 	exit 2
 fi
 
-#while read line
-#do
-#	if grep -Fx "$line" < <(git log --format=%s ${SQUASHED}..${WORKING})
-#	then
-#		echo "Please squash local commit: ${line}"
-#		exit 3
-#	fi
-#done < <(git log --format=%s ${SQUASHED}..${WORKING} | grep "fixup!" | sort | uniq | sed 's/fixup! //g')
-
 git fetch origin ${HISTORY} ${SQUASHED}
 if ! git diff --quiet origin/${HISTORY} origin/${SQUASHED}
 then
 	echo "Error: branches 'origin/${HISTORY}' and 'origin/${SQUASHED}' differ."
-	exit 4
+	exit 3
 fi
 
 if ! git merge-base --is-ancestor origin/${SQUASHED} ${WORKING}
 then
 	echo "Please rebase your work to 'origin/${SQUASHED}':"
 	echo "$ git rebase -i --autosquash --onto=origin/${SQUASHED} ${SQUASHED}"
-	exit 5
+	exit 4
 fi
+
+# while read line
+# do
+# 	if grep -Fx "$line" < <(git log --format=%s origin/${SQUASHED}..${WORKING})
+# 	then
+# 		echo "Please squash local commit: ${line}"
+# 		exit 5
+# 	fi
+# done < <(git log --format=%s origin/${SQUASHED}..${WORKING} | grep "fixup!" | sort | uniq | sed 's/fixup! //g')
 
 while read line
 do
-	if grep -Fx "$line" < <(git log --format=%s origin/${FREEZED}..origin/${SQUASHED})
+	if ! grep -Fx "$line" < <(git log --format=%s origin/${FREEZED}..${WORKING})
 	then
 		echo "Error: fixup commit referecing commit on 'origin/${FREEZED}': ${line}"
 		exit 6
